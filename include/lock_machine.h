@@ -8,20 +8,16 @@
 #include <mutex>
 #include <unordered_map>
 
-template <class Func>
-void lockFunc(Func && func, std::mutex & mutex)
-{
-	std::lock_guard<std::mutex> lock {mutex};
-
-	func();
-}
-
-
 
 class LockMachine
 {
 	public:
 		using PtrType = void const *;
+		using MutexType = std::mutex;
+		using MapType = std::unordered_map<PtrType, MutexType>;
+		using LockType = std::lock_guard<MutexType>;
+
+
 
 		LockMachine() noexcept(noexcept(MapType())) = default;
 
@@ -29,31 +25,23 @@ class LockMachine
 		template <class T, class Func>
 		void lockFunc(T const & obj, Func && func)
 		{
-			lockFunc(static_cast<PtrType>(&obj), std::forward<Func>(func));
+			lockFunc(ptrCast(obj), std::forward<Func>(func));
 		}
 
 		template <class Func>
 		void lockFunc(PtrType objPtr, Func && func)
 		{
-			MapIt it;
-			bool exists;
-
-			{
-				auto lock = lockMap();
-				std::tie(it, exists) = getMutex(objPtr);
-			}
-
-			if (!exists)
-			{
-				it = addObjectPtr(objPtr).first;
-			}
-
-			::lockFunc(std::forward<Func>(func), it->second);
+			lock(objPtr);
+			func();
 		}
 
+		template <class T>
+		LockType lock(T const & obj)
+		{
+			return lock(ptrCast(obj));
+		}
 
-
-		bool enter(PtrType objPtr)
+		LockType lock(PtrType objPtr)
 		{
 			MapIt it;
 			bool exists;
@@ -68,7 +56,7 @@ class LockMachine
 				it = addObjectPtr(objPtr).first;
 			}
 
-			::lockFunc(std::forward<Func>(func), it->second);
+			return LockType(it->second);
 		}
 
 
@@ -92,7 +80,7 @@ class LockMachine
 
 		bool hasObject(PtrType objPtr) const
 		{
-			auto lock = lockMap();
+			//auto lock = lockMap();
 			return mutexMap_.find(objPtr) != mutexMap_.end();
 		}
 
@@ -101,13 +89,17 @@ class LockMachine
 
 
 	private:
-		using MutexType = std::mutex;
-		using MapType = std::unordered_map<PtrType, MutexType>;
 		using MapIt = typename MapType::iterator;
 		using ItResult = std::pair<MapIt, bool>;
 
 		MapType mutexMap_;
 		MutexType mapMutex_;
+
+		template <class T>
+		PtrType ptrCast(T const & obj)
+		{
+			return static_cast<PtrType>(&obj);
+		}
 
 		std::lock_guard<MutexType> lockMap()
 		{
